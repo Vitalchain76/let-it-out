@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Let It Out | Architecture of Catharsis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #09090b; color: #f4f4f5; font-family: sans-serif; }
+        canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+        .typing-dot { animation: typing 1.4s infinite ease-in-out; }
+        .typing-dot:nth-child(1) { animation-delay: 0s; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing { 0%, 100% { opacity: 0.2; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-4px); } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden">
+    <canvas id="particleCanvas"></canvas>
+
+    <div id="app" class="w-full max-w-xl z-10 bg-zinc-900/80 p-8 rounded-2xl border border-zinc-800 backdrop-blur-md shadow-2xl">
+        <div class="text-center mb-6">
+            <h1 class="text-3xl font-light tracking-widest text-zinc-100 uppercase">Let It Out</h1>
+            <p class="text-xs text-zinc-500 mt-1">Single-Session Emotional Discharge &bull; Anonymous &amp; Temporary</p>
+        </div>
+
+        <div id="step1" class="space-y-6">
+            <label class="block text-sm text-zinc-300 text-center">How heavy does your chest feel right now? (1 = Light, 10 = Overwhelmed)</label>
+            <input type="range" id="preMood" min="1" max="10" value="7" class="w-full accent-indigo-500 h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer">
+            <div class="flex justify-between text-xs text-zinc-500">
+                <span>1 (Light)</span>
+                <span id="preMoodVal" class="text-indigo-400 font-bold text-lg">7</span>
+                <span>10 (Heavy)</span>
+            </div>
+            <button onclick="goToStep(2)" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition">Begin Session</button>
+        </div>
+
+        <div id="step2" class="hidden space-y-4">
+            <p class="text-xs text-zinc-400">Write what you are carrying. PII will be scrubbed automatically.</p>
+            <div id="chatHistory" class="space-y-3 max-h-60 overflow-y-auto mb-3 pr-2 text-sm"></div>
+            <textarea id="confessionInput" rows="4" placeholder="I feel..." class="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-200 focus:outline-none focus:border-indigo-500 text-sm resize-none"></textarea>
+            <div id="typingIndicator" class="hidden text-xs text-indigo-400 flex items-center gap-1">
+                Let It Out is listening<span class="typing-dot">.</span><span class="typing-dot">.</span><span class="typing-dot">.</span>
+            </div>
+            <button id="sendBtn" onclick="sendMessage()" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded-xl transition">Disintegrate &amp; Reflect</button>
+            <button onclick="goToStep(3)" class="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-400 rounded-lg transition">Finish &amp; Leave Session</button>
+        </div>
+
+        <div id="step3" class="hidden space-y-6 text-center">
+            <h2 class="text-xl font-light text-zinc-100">Session Closing</h2>
+            <label class="block text-sm text-zinc-300">How heavy do you feel now?</label>
+            <input type="range" id="postMood" min="1" max="10" value="3" class="w-full accent-emerald-500 h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer">
+            <div class="flex justify-between text-xs text-zinc-500">
+                <span>1 (Lighter)</span>
+                <span id="postMoodVal" class="text-emerald-400 font-bold text-lg">3</span>
+                <span>10 (Heavy)</span>
+            </div>
+            <div id="deltaResult" class="p-4 bg-emerald-950/30 border border-emerald-800/50 rounded-xl text-emerald-300 text-sm font-medium"></div>
+            <button onclick="location.reload()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-xl transition">Complete Session</button>
+        </div>
+    </div>
+
+    <script>
+        let sessionData = { initialMood: 7, finalMood: 3 };
+        let thread = [];
+
+        document.getElementById('preMood').addEventListener('input', (e) => {
+            document.getElementById('preMoodVal').innerText = e.target.value;
+            sessionData.initialMood = parseInt(e.target.value);
+            updateDelta();
+        });
+
+        document.getElementById('postMood').addEventListener('input', (e) => {
+            document.getElementById('postMoodVal').innerText = e.target.value;
+            sessionData.finalMood = parseInt(e.target.value);
+            updateDelta();
+        });
+
+        function updateDelta() {
+            const delta = sessionData.finalMood - sessionData.initialMood;
+            const label = delta <= 0 ? `${Math.abs(delta)} Points Lighter` : `+${delta} Points Heavier`;
+            document.getElementById('deltaResult').innerText = `Arrived: ${sessionData.initialMood} | Left: ${sessionData.finalMood} | Mood Delta: ${label}`;
+        }
+
+        function goToStep(step) {
+            [1,2,3].forEach(i => document.getElementById(`step${i}`).classList.add('hidden'));
+            document.getElementById(`step${step}`).classList.remove('hidden');
+            if (step === 3) updateDelta();
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('confessionInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            thread.push({ role: 'user', content: text });
+            renderChat();
+            input.value = '';
+
+            document.getElementById('typingIndicator').classList.remove('hidden');
+            document.getElementById('sendBtn').disabled = true;
+
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messages: thread })
+                });
+
+                const data = await res.json();
+                if (data.content && data.content[0]) {
+                    thread.push({ role: 'assistant', content: data.content[0].text });
+                } else {
+                    thread.push({ role: 'assistant', content: "I'm here holding space for you. Continue when you are ready." });
+                }
+            } catch (err) {
+                thread.push({ role: 'assistant', content: "I am holding space for what you wrote." });
+            } finally {
+                document.getElementById('typingIndicator').classList.add('hidden');
+                document.getElementById('sendBtn').disabled = false;
+                renderChat();
+            }
+        }
+
+        function renderChat() {
+            const box = document.getElementById('chatHistory');
+            box.innerHTML = thread.map(m =>
+                `<div class="p-3 rounded-lg ${m.role === 'user' ? 'bg-zinc-800 text-zinc-200 ml-4' : 'bg-indigo-950/40 border border-indigo-800/40 text-indigo-200 mr-4'}">
+                    ${m.content}
+                </div>`
+            ).join('');
+            box.scrollTop = box.scrollHeight;
+        }
+    </script>
+</body>
+</html>
